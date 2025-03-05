@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF Editor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css">
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <div class="file-input-container">
+                <label for="pdfFile" class="file-input-label">Choose PDF</label>
+                <input type="file" id="pdfFile" accept=".pdf">
+            </div>
+            
+            <div id="color-picker"></div>
+            
+            <div class="brush-size-container">
+                <input type="range" id="brushSize" min="1" max="20" value="2">
+                <span id="brushSizeValue">2px</span>
+            </div>
+            
+            <button id="saveBtn" disabled>Save PDF</button>
+        </div>
+
+        <div class="canvas-container"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html> 
