@@ -2,3 +2,4 @@ venv/
 uploads/
 .env
 .env.local
+test/test_pdfs/

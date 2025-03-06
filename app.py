@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import base64
 import shutil
+import time
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -190,6 +191,46 @@ def get_final_pdf(filename):
         # Clean up work directory in case of error
         if 'work_dir' in locals():
             shutil.rmtree(work_dir, ignore_errors=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/merge', methods=['POST'])
+def merge_pdfs():
+    if 'files[]' not in request.files:
+        return jsonify({'error': 'No files provided'}), 400
+    
+    files = request.files.getlist('files[]')
+    if not files:
+        return jsonify({'error': 'No files selected'}), 400
+    
+    try:
+        # Create a new PDF
+        merged_pdf = fitz.open()
+        
+        # Add each PDF to the merged document
+        for file in files:
+            if not file.filename.endswith('.pdf'):
+                continue
+                
+            # Save the uploaded file temporarily
+            temp_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(temp_path)
+            
+            # Open and add pages to merged PDF
+            pdf = fitz.open(temp_path)
+            merged_pdf.insert_pdf(pdf)
+            pdf.close()
+            
+            # Clean up temporary file
+            os.remove(temp_path)
+        
+        # Save the merged PDF
+        output_filename = f"merged_{int(time.time())}.pdf"
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+        merged_pdf.save(output_path, garbage=4, clean=True)
+        merged_pdf.close()
+        
+        return send_file(output_path, as_attachment=True, download_name=output_filename)
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

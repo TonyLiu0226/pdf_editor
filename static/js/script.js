@@ -2,6 +2,10 @@ let canvases = [];
 let currentColor = '#ff0000';
 let currentFile = null;
 let totalPages = 0;
+let isErasing = false;
+let isDrawingEraser = false;
+let lastUsedColor = currentColor;
+let lastUsedBrushWidth = 2;
 
 // Initialize color picker
 const pickr = Pickr.create({
@@ -23,12 +27,154 @@ const pickr = Pickr.create({
     }
 });
 
+// Tool selection
+const drawBtn = document.getElementById('drawBtn');
+const eraseBtn = document.getElementById('eraseBtn');
+const drawEraserBtn = document.getElementById('drawEraserBtn');
+
+function setActiveButton(activeBtn) {
+    [drawBtn, eraseBtn, drawEraserBtn].forEach(btn => {
+        btn.classList.remove('active');
+    });
+    activeBtn.classList.add('active');
+}
+
+// Drawing mode
+drawBtn.addEventListener('click', () => {
+    if (isErasing || isDrawingEraser) {
+        isErasing = false;
+        isDrawingEraser = false;
+        setActiveButton(drawBtn);
+        
+        // Restore last used color and brush size
+        currentColor = lastUsedColor;
+        canvases.forEach(canvas => {
+            canvas.isDrawingMode = true;
+            canvas.freeDrawingBrush.color = currentColor;
+            canvas.freeDrawingBrush.width = lastUsedBrushWidth;
+            
+            // Remove any existing event listeners
+            canvas.off('mouse:down');
+            canvas.off('mouse:move');
+            canvas.off('mouse:up');
+        });
+        pickr.setColor(currentColor);
+        brushSize.value = lastUsedBrushWidth;
+        brushSizeValue.textContent = lastUsedBrushWidth + 'px';
+    }
+});
+
+// White eraser mode (original eraser)
+eraseBtn.addEventListener('click', () => {
+    if (!isErasing) {
+        isErasing = true;
+        isDrawingEraser = false;
+        setActiveButton(eraseBtn);
+        
+        // Store current color and brush size
+        lastUsedColor = currentColor;
+        lastUsedBrushWidth = parseInt(brushSize.value);
+        
+        // Set eraser properties
+        currentColor = '#ffffff';
+        canvases.forEach(canvas => {
+            canvas.isDrawingMode = true;
+            canvas.freeDrawingBrush.color = currentColor;
+            canvas.freeDrawingBrush.width = parseInt(brushSize.value);
+            
+            // Remove any existing event listeners
+            canvas.off('mouse:down');
+            canvas.off('mouse:move');
+            canvas.off('mouse:up');
+        });
+        pickr.setColor(currentColor);
+    }
+});
+
+// Drawing eraser mode (erases only drawn content)
+drawEraserBtn.addEventListener('click', () => {
+    if (!isDrawingEraser) {
+        isDrawingEraser = true;
+        isErasing = false;
+        setActiveButton(drawEraserBtn);
+        
+        canvases.forEach(canvas => {
+            // Disable drawing mode
+            canvas.isDrawingMode = false;
+            canvas.selection = false;
+            canvas.defaultCursor = 'crosshair';
+            
+            // Remove existing event listeners
+            canvas.off('mouse:down');
+            canvas.off('mouse:move');
+            canvas.off('mouse:up');
+            
+            let isErasing = false;
+            let eraserPath = [];
+            
+            canvas.on('mouse:down', (options) => {
+                isErasing = true;
+                const pointer = canvas.getPointer(options.e);
+                eraserPath = [{x: pointer.x, y: pointer.y}];
+            });
+            
+            canvas.on('mouse:move', (options) => {
+                if (!isErasing) return;
+                
+                const pointer = canvas.getPointer(options.e);
+                eraserPath.push({x: pointer.x, y: pointer.y});
+                
+                // Get all drawn paths
+                const paths = canvas.getObjects().filter(obj => obj instanceof fabric.Path);
+                
+                paths.forEach(path => {
+                    // Convert the path's points to absolute coordinates
+                    const points = path.path.map(point => {
+                        if (point[0] === 'M' || point[0] === 'L') {
+                            return {
+                                x: path.left + (point[1] * path.scaleX),
+                                y: path.top + (point[2] * path.scaleY)
+                            };
+                        }
+                        return null;
+                    }).filter(point => point !== null);
+                    
+                    // Check if any point in the eraser path intersects with the drawn path
+                    const eraserRadius = parseInt(brushSize.value);
+                    const lastEraserPoint = eraserPath[eraserPath.length - 1];
+                    
+                    for (let point of points) {
+                        const dx = point.x - lastEraserPoint.x;
+                        const dy = point.y - lastEraserPoint.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (distance <= eraserRadius) {
+                            canvas.remove(path);
+                            break;
+                        }
+                    }
+                });
+                
+                canvas.renderAll();
+            });
+            
+            canvas.on('mouse:up', () => {
+                isErasing = false;
+                eraserPath = [];
+            });
+        });
+    }
+});
+
 // Color picker event
 pickr.on('change', (color) => {
-    currentColor = color.toHEXA().toString();
-    canvases.forEach(canvas => {
-        canvas.freeDrawingBrush.color = currentColor;
-    });
+    if (!isErasing && !isDrawingEraser) {
+        currentColor = color.toHEXA().toString();
+        lastUsedColor = currentColor;
+        canvases.forEach(canvas => {
+            canvas.freeDrawingBrush.color = currentColor;
+        });
+    }
 });
 
 // Brush size slider
@@ -36,8 +182,13 @@ const brushSize = document.getElementById('brushSize');
 const brushSizeValue = document.getElementById('brushSizeValue');
 brushSize.addEventListener('input', (e) => {
     const size = parseInt(e.target.value);
+    if (!isErasing && !isDrawingEraser) {
+        lastUsedBrushWidth = size;
+    }
     canvases.forEach(canvas => {
-        canvas.freeDrawingBrush.width = size;
+        if (canvas.isDrawingMode) {
+            canvas.freeDrawingBrush.width = size;
+        }
     });
     brushSizeValue.textContent = size + 'px';
 });
@@ -148,8 +299,20 @@ async function loadAllPages() {
             width: 1500,
             height: 1500
         });
-        canvas.freeDrawingBrush.color = currentColor;
-        canvas.freeDrawingBrush.width = parseInt(brushSize.value);
+        
+        // Set initial brush properties based on current mode
+        if (isErasing) {
+            canvas.freeDrawingBrush.color = '#ffffff';
+            canvas.freeDrawingBrush.width = parseInt(brushSize.value);
+        } else if (isDrawingEraser) {
+            canvas.isDrawingMode = false;
+            canvas.selection = false;
+            canvas.defaultCursor = 'crosshair';
+        } else {
+            canvas.freeDrawingBrush.color = currentColor;
+            canvas.freeDrawingBrush.width = parseInt(brushSize.value);
+        }
+        
         canvases.push(canvas);
 
         try {
@@ -180,7 +343,110 @@ function enableControls() {
     document.getElementById('saveBtn').disabled = false;
 }
 
-// Remove navigation buttons since we're showing all pages
-document.getElementById('prevPage').remove();
-document.getElementById('nextPage').remove();
-document.getElementById('pageInfo').remove(); 
+// Tab switching
+const tabs = document.querySelectorAll('.nav-tab');
+const tabContents = document.querySelectorAll('.tab');
+
+tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        // Remove active class from all tabs and contents
+        tabs.forEach(t => t.classList.remove('active'));
+        tabContents.forEach(content => content.classList.remove('active'));
+        
+        // Add active class to clicked tab and corresponding content
+        tab.classList.add('active');
+        const tabId = tab.getAttribute('data-tab');
+        document.getElementById(`${tabId}-tab`).classList.add('active');
+    });
+});
+
+// PDF Merge functionality
+const mergePdfFiles = document.getElementById('mergePdfFiles');
+const fileList = document.getElementById('fileList');
+const mergeBtn = document.getElementById('mergeBtn');
+let selectedFiles = [];
+
+mergePdfFiles.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files);
+    
+    // Add new files to the list
+    files.forEach(file => {
+        if (file.type !== 'application/pdf') {
+            alert(`${file.name} is not a PDF file`);
+            return;
+        }
+        
+        if (!selectedFiles.some(f => f.name === file.name)) {
+            selectedFiles.push(file);
+            
+            // Create file item element
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            
+            const fileName = document.createElement('span');
+            fileName.className = 'file-name';
+            fileName.textContent = file.name;
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-file';
+            removeBtn.textContent = 'Remove';
+            removeBtn.onclick = () => {
+                selectedFiles = selectedFiles.filter(f => f.name !== file.name);
+                fileItem.remove();
+                updateMergeButton();
+            };
+            
+            fileItem.appendChild(fileName);
+            fileItem.appendChild(removeBtn);
+            fileList.appendChild(fileItem);
+        }
+    });
+    
+    // Reset file input
+    e.target.value = '';
+    updateMergeButton();
+});
+
+function updateMergeButton() {
+    mergeBtn.disabled = selectedFiles.length < 2;
+}
+
+mergeBtn.addEventListener('click', async () => {
+    if (selectedFiles.length < 2) return;
+    
+    const formData = new FormData();
+    selectedFiles.forEach(file => {
+        formData.append('files[]', file);
+    });
+    
+    try {
+        const response = await fetch('/merge', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (response.ok) {
+            // Download the merged PDF
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `merged_${Date.now()}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+            
+            // Clear the file list
+            selectedFiles = [];
+            fileList.innerHTML = '';
+            updateMergeButton();
+        } else {
+            const data = await response.json();
+            alert('Error merging PDFs: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error merging PDFs');
+    }
+});
