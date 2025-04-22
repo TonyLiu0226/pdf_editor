@@ -39,132 +39,91 @@ function setActiveButton(activeBtn) {
     activeBtn.classList.add('active');
 }
 
-// Drawing mode
-drawBtn.addEventListener('click', () => {
+// Helper to clear any eraser listeners
+function clearEraserListeners(canvas) {
+    canvas.off('mouse:down');
+    canvas.off('mouse:move');
+}
+  
+  // Drawing mode
+  drawBtn.addEventListener('click', () => {
     if (isErasing || isDrawingEraser) {
-        isErasing = false;
-        isDrawingEraser = false;
-        setActiveButton(drawBtn);
-        
-        // Restore last used color and brush size
-        currentColor = lastUsedColor;
-        canvases.forEach(canvas => {
-            canvas.isDrawingMode = true;
-            canvas.freeDrawingBrush.color = currentColor;
-            canvas.freeDrawingBrush.width = lastUsedBrushWidth;
-            
-            // Remove any existing event listeners
-            canvas.off('mouse:down');
-            canvas.off('mouse:move');
-            canvas.off('mouse:up');
-        });
-        pickr.setColor(currentColor);
-        brushSize.value = lastUsedBrushWidth;
-        brushSizeValue.textContent = lastUsedBrushWidth + 'px';
+      isErasing = false;
+      isDrawingEraser = false;
+      setActiveButton(drawBtn);
+  
+      // Restore last used color and brush size
+      currentColor = lastUsedColor;
+      canvases.forEach(canvas => {
+        canvas.isDrawingMode = true;
+        clearEraserListeners(canvas);
+        canvas.freeDrawingBrush.color = currentColor;
+        canvas.freeDrawingBrush.width = lastUsedBrushWidth;
+      });
+      pickr.setColor(currentColor);
+      brushSize.value = lastUsedBrushWidth;
+      brushSizeValue.textContent = lastUsedBrushWidth + 'px';
     }
 });
-
-// White eraser mode (original eraser)
-eraseBtn.addEventListener('click', () => {
-    if (!isErasing) {
-        isErasing = true;
-        isDrawingEraser = false;
-        setActiveButton(eraseBtn);
-        
-        // Store current color and brush size
-        lastUsedColor = currentColor;
-        lastUsedBrushWidth = parseInt(brushSize.value);
-        
-        // Set eraser properties
-        currentColor = '#ffffff';
-        canvases.forEach(canvas => {
-            canvas.isDrawingMode = true;
-            canvas.freeDrawingBrush.color = currentColor;
-            canvas.freeDrawingBrush.width = parseInt(brushSize.value);
-            
-            // Remove any existing event listeners
-            canvas.off('mouse:down');
-            canvas.off('mouse:move');
-            canvas.off('mouse:up');
-        });
-        pickr.setColor(currentColor);
+  
+  // White eraser mode (just paints white)
+  eraseBtn.addEventListener('click', () => {
+    if (!isErasing || isDrawingEraser) {
+      isErasing = true;
+      isDrawingEraser = false;
+      setActiveButton(eraseBtn);
+  
+      lastUsedColor = currentColor;
+      lastUsedBrushWidth = parseInt(brushSize.value);
+      currentColor = '#ffffff';
+  
+      canvases.forEach(canvas => {
+        canvas.isDrawingMode = true;
+        clearEraserListeners(canvas);
+        canvas.freeDrawingBrush.color = currentColor;
+        canvas.freeDrawingBrush.width = lastUsedBrushWidth;
+      });
+      pickr.setColor(currentColor);
     }
 });
-
-// Drawing eraser mode (erases only drawn content)
-drawEraserBtn.addEventListener('click', () => {
-    if (!isDrawingEraser) {
-        isDrawingEraser = true;
-        isErasing = false;
-        setActiveButton(drawEraserBtn);
-        
-        canvases.forEach(canvas => {
-            // Disable drawing mode
-            canvas.isDrawingMode = false;
-            canvas.selection = false;
-            canvas.defaultCursor = 'crosshair';
-            
-            // Remove existing event listeners
-            canvas.off('mouse:down');
-            canvas.off('mouse:move');
-            canvas.off('mouse:up');
-            
-            let isErasing = false;
-            let eraserPath = [];
-            
-            canvas.on('mouse:down', (options) => {
-                isErasing = true;
-                const pointer = canvas.getPointer(options.e);
-                eraserPath = [{x: pointer.x, y: pointer.y}];
-            });
-            
-            canvas.on('mouse:move', (options) => {
-                if (!isErasing) return;
-                
-                const pointer = canvas.getPointer(options.e);
-                eraserPath.push({x: pointer.x, y: pointer.y});
-                
-                // Get all drawn paths
-                const paths = canvas.getObjects().filter(obj => obj instanceof fabric.Path);
-                
-                paths.forEach(path => {
-                    // Convert the path's points to absolute coordinates
-                    const points = path.path.map(point => {
-                        if (point[0] === 'M' || point[0] === 'L') {
-                            return {
-                                x: path.left + (point[1] * path.scaleX),
-                                y: path.top + (point[2] * path.scaleY)
-                            };
-                        }
-                        return null;
-                    }).filter(point => point !== null);
-                    
-                    // Check if any point in the eraser path intersects with the drawn path
-                    const eraserRadius = parseInt(brushSize.value);
-                    const lastEraserPoint = eraserPath[eraserPath.length - 1];
-                    
-                    for (let point of points) {
-                        const dx = point.x - lastEraserPoint.x;
-                        const dy = point.y - lastEraserPoint.y;
-                        const distance = Math.sqrt(dx * dx + dy * dy);
-                        
-                        if (distance <= eraserRadius) {
-                            canvas.remove(path);
-                            break;
-                        }
-                    }
-                });
-                
-                canvas.renderAll();
-            });
-            
-            canvas.on('mouse:up', () => {
-                isErasing = false;
-                eraserPath = [];
-            });
+  
+  // Drawing eraser mode (truly erases only drawn paths)
+  drawEraserBtn.addEventListener('click', () => {
+    if (!isErasing || !isDrawingEraser) {
+      isErasing = true;
+      isDrawingEraser = true;
+      setActiveButton(drawEraserBtn);
+  
+      // Store current tool settings
+      lastUsedColor = currentColor;
+      lastUsedBrushWidth = parseInt(brushSize.value);
+  
+      canvases.forEach(canvas => {
+        // turn off brush mode
+        canvas.isDrawingMode = false;
+        canvas.selection = false;
+        canvas.defaultCursor = 'crosshair';
+        clearEraserListeners(canvas);
+  
+        // on mousedown (or move, if you want click‑and‑drag)
+        canvas.on('mouse:down', function(opt) {
+          const target = opt.target;
+          // only remove free‑drawn paths (type 'path')
+          if (target && target.type === 'path') {
+            canvas.remove(target);
+          }
         });
+        // Optional: support drag‑to‑erase
+        canvas.on('mouse:move', function(opt) {
+          if (opt.e.buttons !== 1) return; // only while mouse is down
+          const target = canvas.findTarget(opt.e);
+          if (target && target.type === 'path') {
+            canvas.remove(target);
+          }
+        });
+      });
     }
-});
+}); 
 
 // Color picker event
 pickr.on('change', (color) => {
