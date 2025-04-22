@@ -27,6 +27,15 @@ const pickr = Pickr.create({
     }
 });
 
+function handleTextModeClick(opt) {
+    if (!isTextMode) return;
+    const canvas = opt.target?.canvas || this;
+    const pointer = canvas.getPointer(opt.e);
+    if (!opt.target) {
+        openTextInputDialog(canvas, pointer.x, pointer.y);
+    }
+}
+
 // Tool selection
 const drawBtn = document.getElementById('drawBtn');
 const eraseBtn = document.getElementById('eraseBtn');
@@ -47,6 +56,7 @@ function clearEraserListeners(canvas) {
   
   // Drawing mode
   drawBtn.addEventListener('click', () => {
+    if (isTextMode) setTextMode(false);
     if (isErasing || isDrawingEraser) {
       isErasing = false;
       isDrawingEraser = false;
@@ -68,6 +78,7 @@ function clearEraserListeners(canvas) {
   
   // White eraser mode (just paints white)
   eraseBtn.addEventListener('click', () => {
+    if (isTextMode) setTextMode(false);
     if (!isErasing || isDrawingEraser) {
       isErasing = true;
       isDrawingEraser = false;
@@ -89,6 +100,7 @@ function clearEraserListeners(canvas) {
   
   // Drawing eraser mode (truly erases only drawn paths)
   drawEraserBtn.addEventListener('click', () => {
+    if (isTextMode) setTextMode(false);
     if (!isErasing || !isDrawingEraser) {
       isErasing = true;
       isDrawingEraser = true;
@@ -295,6 +307,23 @@ async function loadAllPages() {
         } catch (error) {
             console.error(`Error loading page ${pageNum}:`, error);
         }
+
+        // After initializing the canvas:
+        canvas.on('mouse:down', function(opt) {
+            if (!isTextMode) return;
+            const pointer = canvas.getPointer(opt.e);
+            // Only add new text if not clicking on an existing object
+            if (!opt.target) {
+                openTextInputDialog(canvas, pointer.x, pointer.y);
+            }
+        });
+        // Ensure text objects are selectable for resizing/moving
+        canvas.on('object:added', function(opt) {
+            if (opt.target && opt.target.type === 'textbox') {
+                opt.target.selectable = true;
+                opt.target.evented = true;
+            }
+        });
     }
 }
 
@@ -409,3 +438,79 @@ mergeBtn.addEventListener('click', async () => {
         alert('Error merging PDFs');
     }
 });
+
+// --- Text Insertion Functionality ---
+
+// Add a button for text tool in your HTML with id 'textBtn'
+const textBtn = document.getElementById('textBtn');
+
+// Track text tool state
+let isTextMode = false;
+
+function setTextMode(active) {
+    isTextMode = active;
+    if (active) {
+        setActiveButton(textBtn);
+        canvases.forEach(canvas => {
+            canvas.isDrawingMode = false;
+            canvas.defaultCursor = 'text';
+            canvas.selection = true;
+
+            // Remove previous listener to avoid duplicates
+            canvas.off('mouse:down', handleTextModeClick);
+
+            // Add handler again
+            canvas.on('mouse:down', handleTextModeClick);
+
+            canvas.forEachObject(obj => {
+                obj.selectable = obj.type === 'textbox';
+                obj.evented = obj.type === 'textbox';
+            });
+        });
+    } else {
+        textBtn.classList.remove('active');
+        canvases.forEach(canvas => {
+            canvas.off('mouse:down', handleTextModeClick); // Clean up listener
+
+            canvas.forEachObject(obj => {
+                obj.selectable = obj.type === 'textbox';
+                obj.evented = obj.type === 'textbox';
+            });
+            canvas.isDrawingMode = !isErasing && !isDrawingEraser;
+            canvas.defaultCursor = 'default';
+            canvas.selection = false;
+        });
+    }
+}
+
+// Text tool button event
+textBtn.addEventListener('click', () => {
+    setTextMode(!isTextMode);
+});
+
+// Add text on canvas click when in text mode
+canvases.forEach(canvas => {
+    canvas.on('mouse:down', function(opt) {
+        if (!isTextMode) return;
+        const pointer = canvas.getPointer(opt.e);
+        openTextInputDialog(canvas, pointer.x, pointer.y);
+    });
+});
+
+// Helper to open a prompt for text input and add to canvas
+function openTextInputDialog(canvas, x, y) {
+    const text = prompt('Enter text:');
+    if (text && text.trim() !== '') {
+        const textbox = new fabric.Textbox(text, {
+            left: x,
+            top: y,
+            fontSize: 32,
+            fill: currentColor,
+            editable: true
+        });
+        canvas.add(textbox);
+        canvas.setActiveObject(textbox);
+        canvas.renderAll();
+    }
+}
+
