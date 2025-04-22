@@ -6,24 +6,17 @@ import io
 import base64
 import shutil
 import time
-import tempfile
-from urllib.parse import quote, unquote
-from supabase_client import upload_file_object, download_to_temp, delete_file, upload_temp_file, cleanup_temp_file
 
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Define a higher resolution zoom matrix for better quality
 ZOOM_MATRIX = fitz.Matrix(4, 4)  # Increased from 2,2 to 4,4 for higher resolution
 TARGET_WIDTH = 1500  # Increased target width for better quality
 
-def sanitize_filename(filename):
-    """Sanitize filename to be URL and filesystem safe"""
-    # Remove any path components
-    filename = os.path.basename(filename)
-    # Replace spaces and special characters
-    safe_name = "".join(c for c in filename if c.isalnum() or c in '._-')
-    return safe_name
+# Ensure upload folder exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 def get_scaled_dimensions(page):
     """Calculate scaled dimensions maintaining aspect ratio"""
@@ -34,38 +27,23 @@ def get_scaled_dimensions(page):
 
 def convert_page_to_image(page):
     """Convert PDF page to image with consistent high-resolution scaling"""
-    try:
-        # Get page dimensions at default resolution
-        target_width, target_height = get_scaled_dimensions(page)
-        
-        # Use a higher DPI for better quality
-        zoom = 4  # Increase zoom factor for higher resolution
-        mat = fitz.Matrix(zoom, zoom)
-        
-        # Get high-resolution pixmap with alpha channel
-        pix = page.get_pixmap(matrix=mat, alpha=False)
-        
-        # Convert to PIL Image
-        img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
-        
-        # Calculate new dimensions while maintaining aspect ratio
-        aspect_ratio = img.height / img.width
-        new_height = int(target_width * aspect_ratio)
-        
-        # Use high-quality downsampling
-        img = img.resize((target_width, new_height), Image.Resampling.LANCZOS)
-        
-        # Save with maximum quality
-        img_io = io.BytesIO()
-        img.save(img_io, format='PNG', optimize=True, quality=100)
-        img_io.seek(0)
-        
-        print(f"Converted page to image: {target_width}x{new_height}")
-        return img_io, target_width, new_height
-        
-    except Exception as e:
-        print(f"Error converting page to image: {str(e)}")
-        raise
+    target_width, target_height = get_scaled_dimensions(page)
+    
+    # Get high-resolution pixmap
+    pix = page.get_pixmap(matrix=ZOOM_MATRIX, alpha=False)
+    
+    # Convert to PIL Image with high quality
+    img = Image.frombytes('RGB', [pix.width, pix.height], pix.samples)
+    
+    # Use high-quality downsampling
+    if img.size[0] > target_width:
+        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+    
+    # Save with high quality
+    img_io = io.BytesIO()
+    img.save(img_io, 'PNG', quality=95, optimize=False)
+    img_io.seek(0)
+    return img_io, target_width, target_height
 
 @app.route('/')
 def index():
@@ -83,149 +61,82 @@ def upload_file():
     if not file.filename.endswith('.pdf'):
         return jsonify({'error': 'File must be a PDF'}), 400
     
+    # Save the uploaded file
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    file.save(filepath)
+    
     try:
-        print(f"Processing upload for file: {file.filename}")
-        
-        # Sanitize filename before upload
-        safe_filename = sanitize_filename(file.filename)
-        print(f"Sanitized filename: {safe_filename}")
-        
-        # Upload file to Supabase
-        file_path, public_url = upload_file_object(file, safe_filename)
-        print(f"File uploaded to Supabase: {file_path}")
-        
-        # Download to temp file for processing
-        temp_file_path = download_to_temp(file_path)
-        print(f"Downloaded to temp file: {temp_file_path}")
-        
-        # Process the PDF
-        pdf = fitz.open(temp_file_path)
-        total_pages = len(pdf)
-        print(f"PDF opened successfully. Total pages: {total_pages}")
-        
         # Convert first page to image
+        pdf = fitz.open(filepath)
         page = pdf[0]
-        print(f"Processing page 1/{total_pages}")
+        
+        # Convert to image with consistent scaling
         img_io, width, height = convert_page_to_image(page)
         img_base64 = base64.b64encode(img_io.getvalue()).decode()
-        print(f"Page converted to image: {width}x{height}")
         
-        # Clean up
-        pdf.close()
-        cleanup_temp_file(temp_file_path)
-        print("Cleanup completed")
-        
-        response_data = {
+        return jsonify({
             'success': True,
-            'filename': safe_filename,
-            'file_path': file_path,
-            'public_url': public_url,
-            'total_pages': total_pages,
+            'filename': file.filename,
+            'total_pages': len(pdf),
             'current_page': 1,
             'image_data': img_base64,
             'width': width,
             'height': height
-        }
-        print("Sending response with image data")
-        return jsonify(response_data)
-        
+        })
     except Exception as e:
-        print(f"Error in upload: {str(e)}")
-        # Clean up temp file if it exists
-        if 'temp_file_path' in locals():
-            cleanup_temp_file(temp_file_path)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/get_page/<path:file_path>/<int:page_num>')
-def get_page(file_path, page_num):
-    temp_file_path = None
-    pdf = None
+@app.route('/get_page/<filename>/<int:page_num>')
+def get_page(filename, page_num):
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
+    
     try:
-        print(f"Getting page {page_num} from file: {file_path}")
-        
-        # Clean up and decode the file path
-        file_path = unquote(file_path)
-        file_path = file_path.replace('\\', '/').strip('/')
-        
-        # Don't modify the file path - use it exactly as stored
-        print(f"Using file path: {file_path}")
-        
-        # Download to temp file
-        temp_file_path = download_to_temp(file_path)
-        print(f"Downloaded to temp file: {temp_file_path}")
-        
-        # Process the PDF
-        pdf = fitz.open(temp_file_path)
-        total_pages = len(pdf)
-        print(f"PDF opened successfully. Total pages: {total_pages}")
-        
-        if page_num < 1 or page_num > total_pages:
-            print(f"Invalid page number: {page_num}")
+        pdf = fitz.open(filepath)
+        if page_num < 1 or page_num > len(pdf):
             return jsonify({'error': 'Invalid page number'}), 400
         
-        # Convert page to image
-        print(f"Processing page {page_num}/{total_pages}")
+        # Convert page to image with consistent scaling
         page = pdf[page_num - 1]
         img_io, width, height = convert_page_to_image(page)
         img_base64 = base64.b64encode(img_io.getvalue()).decode()
-        print(f"Page converted to image: {width}x{height}")
         
-        response_data = {
+        return jsonify({
             'success': True,
             'image_data': img_base64,
             'width': width,
             'height': height
-        }
-        print("Sending response with image data")
-        return jsonify(response_data)
-        
+        })
     except Exception as e:
-        print(f"Error in get_page: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-        
-    finally:
-        # Clean up resources
-        if pdf:
-            try:
-                pdf.close()
-            except:
-                pass
-                
-        if temp_file_path:
-            try:
-                cleanup_temp_file(temp_file_path)
-                print("Cleanup completed")
-            except:
-                pass
 
 @app.route('/save', methods=['POST'])
 def save_pdf():
     data = request.json
-    if not data or 'image_data' not in data or 'file_path' not in data or 'current_page' not in data:
+    if not data or 'image_data' not in data or 'filename' not in data or 'current_page' not in data:
         return jsonify({'error': 'Missing required data'}), 400
     
     try:
-        # Create temporary directory for processing
-        work_dir = tempfile.mkdtemp()
-        
-        # Download original PDF to temp file
-        temp_input_path = download_to_temp(data['file_path'])
+        # Create a working directory for this save operation
+        base_filename = os.path.splitext(data['filename'])[0]
+        work_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'work_{base_filename}')
+        os.makedirs(work_dir, exist_ok=True)
         
         # Save the edited page as a single-page PDF
         img_data = base64.b64decode(data['image_data'].split(',')[1])
         img = Image.open(io.BytesIO(img_data))
         img_rgb = img.convert('RGB')
         
-        # Get original page dimensions
-        pdf_doc = fitz.open(temp_input_path)
+        # Get original page dimensions from the PDF
+        input_path = os.path.join(app.config['UPLOAD_FOLDER'], data['filename'])
+        pdf_doc = fitz.open(input_path)
         page = pdf_doc[int(data['current_page']) - 1]
         orig_width = page.rect.width
         orig_height = page.rect.height
         pdf_doc.close()
         
-        # Resize image to match original dimensions
+        # Resize image to match original PDF dimensions
         img_rgb = img_rgb.resize((int(orig_width), int(orig_height)), Image.Resampling.LANCZOS)
         
         # Save the edited page
@@ -234,29 +145,23 @@ def save_pdf():
         
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        # Clean up temporary files
-        if 'temp_input_path' in locals():
-            cleanup_temp_file(temp_input_path)
+        # Clean up work directory in case of error
         if 'work_dir' in locals():
             shutil.rmtree(work_dir, ignore_errors=True)
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/get_final_pdf/<path:file_path>')
-def get_final_pdf(file_path):
+@app.route('/get_final_pdf/<filename>')
+def get_final_pdf(filename):
     try:
-        # Create temporary directory for processing
-        work_dir = tempfile.mkdtemp()
-        temp_input_path = download_to_temp(file_path)
-        
-        # Create temporary output file
-        temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-        temp_output_path = temp_output.name
-        temp_output.close()
+        base_filename = os.path.splitext(filename)[0]
+        work_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'work_{base_filename}')
+        input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        output_filename = f"edited_{filename}"
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
         
         # Create the final merged PDF
         result_pdf = fitz.open()
-        orig_pdf = fitz.open(temp_input_path)
+        orig_pdf = fitz.open(input_path)
         total_pages = len(orig_pdf)
         
         # Add all pages, replacing edited ones
@@ -274,35 +179,18 @@ def get_final_pdf(file_path):
                 result_pdf.insert_pdf(orig_pdf, from_page=i, to_page=i)
         
         # Save the final merged PDF
-        result_pdf.save(temp_output_path, garbage=4, clean=True)
+        result_pdf.save(output_path, garbage=4, clean=True)
         result_pdf.close()
         orig_pdf.close()
         
-        # Upload the final PDF to Supabase
-        original_filename = os.path.basename(file_path)
-        base_name = os.path.splitext(original_filename)[0]
-        new_filename = f"edited_{base_name}.pdf"
-        file_path, public_url = upload_temp_file(temp_output_path, new_filename)
+        # Clean up work directory
+        shutil.rmtree(work_dir)
         
-        # Clean up temporary files
-        shutil.rmtree(work_dir, ignore_errors=True)
-        cleanup_temp_file(temp_input_path)
-        cleanup_temp_file(temp_output_path)
-        
-        # Return the public URL
-        return jsonify({
-            'success': True,
-            'file_path': file_path,
-            'public_url': public_url
-        })
+        return send_file(output_path, as_attachment=True)
     except Exception as e:
-        # Clean up temporary files
+        # Clean up work directory in case of error
         if 'work_dir' in locals():
             shutil.rmtree(work_dir, ignore_errors=True)
-        if 'temp_input_path' in locals():
-            cleanup_temp_file(temp_input_path)
-        if 'temp_output_path' in locals():
-            cleanup_temp_file(temp_output_path)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/merge', methods=['POST'])
@@ -317,52 +205,32 @@ def merge_pdfs():
     try:
         # Create a new PDF
         merged_pdf = fitz.open()
-        temp_files = []
         
-        # Process each file
+        # Add each PDF to the merged document
         for file in files:
             if not file.filename.endswith('.pdf'):
                 continue
+                
+            # Save the uploaded file temporarily
+            temp_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            file.save(temp_path)
             
-            # Upload to Supabase and get temp file
-            file_path, _ = upload_file_object(file, file.filename)
-            temp_file = download_to_temp(file_path)
-            temp_files.append((temp_file, file_path))
-            
-            # Add to merged PDF
-            pdf = fitz.open(temp_file)
+            # Open and add pages to merged PDF
+            pdf = fitz.open(temp_path)
             merged_pdf.insert_pdf(pdf)
             pdf.close()
+            
+            # Clean up temporary file
+            os.remove(temp_path)
         
-        # Save the merged PDF to temp file
-        temp_output = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-        temp_output_path = temp_output.name
-        temp_output.close()
-        
-        merged_pdf.save(temp_output_path, garbage=4, clean=True)
+        # Save the merged PDF
+        output_filename = f"merged_{int(time.time())}.pdf"
+        output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
+        merged_pdf.save(output_path, garbage=4, clean=True)
         merged_pdf.close()
         
-        # Upload merged PDF to Supabase
-        output_filename = f"merged_{int(time.time())}.pdf"
-        file_path, public_url = upload_temp_file(temp_output_path, output_filename)
-        
-        # Clean up temporary files
-        for temp_file, _ in temp_files:
-            cleanup_temp_file(temp_file)
-        cleanup_temp_file(temp_output_path)
-        
-        return jsonify({
-            'success': True,
-            'file_path': file_path,
-            'public_url': public_url
-        })
+        return send_file(output_path, as_attachment=True, download_name=output_filename)
     except Exception as e:
-        # Clean up temporary files
-        if 'temp_files' in locals():
-            for temp_file, _ in temp_files:
-                cleanup_temp_file(temp_file)
-        if 'temp_output_path' in locals():
-            cleanup_temp_file(temp_output_path)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

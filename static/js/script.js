@@ -209,7 +209,7 @@ document.getElementById('pdfFile').addEventListener('change', async (e) => {
         const data = await response.json();
 
         if (data.success) {
-            currentFile = data.file_path;
+            currentFile = data.filename;
             totalPages = data.total_pages;
             // Clear existing canvases
             document.querySelector('.canvas-container').innerHTML = '';
