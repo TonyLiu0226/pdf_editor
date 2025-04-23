@@ -8,15 +8,20 @@ import shutil
 import time
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
+
+# Determine upload folder based on environment
+if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV") or os.path.exists("/tmp"):
+    upload_folder = "/tmp"
+else:
+    upload_folder = os.path.join(os.path.dirname(__file__), "uploads")
+    os.makedirs(upload_folder, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = upload_folder
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Define a higher resolution zoom matrix for better quality
 ZOOM_MATRIX = fitz.Matrix(4, 4)  # Increased from 2,2 to 4,4 for higher resolution
 TARGET_WIDTH = 1500  # Increased target width for better quality
-
-# Ensure upload folder exists
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 def get_scaled_dimensions(page):
     """Calculate scaled dimensions maintaining aspect ratio"""
