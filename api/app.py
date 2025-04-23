@@ -7,7 +7,7 @@ import base64
 import shutil
 import time
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', template_folder='templates')
 
 # Determine upload folder based on environment
 if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV") or os.path.exists("/tmp"):
@@ -20,7 +20,7 @@ app.config['UPLOAD_FOLDER'] = upload_folder
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Define a higher resolution zoom matrix for better quality
-ZOOM_MATRIX = fitz.Matrix(4, 4)  # Increased from 2,2 to 4,4 for higher resolution
+ZOOM_MATRIX = fitz.Matrix(8, 8)  # Increased from 2,2 to 4,4 for higher resolution
 TARGET_WIDTH = 1500  # Increased target width for better quality
 
 def get_scaled_dimensions(page):
