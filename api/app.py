@@ -7,7 +7,7 @@ import base64
 import shutil
 import time
 
-app = Flask(__name__, static_folder='static', template_folder='templates')
+app = Flask(__name__, static_folder='../static', template_folder='../templates')
 
 # Determine upload folder based on environment
 if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV") or os.path.exists("/tmp"):
