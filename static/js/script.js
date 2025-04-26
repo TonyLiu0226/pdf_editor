@@ -6,6 +6,8 @@ let isErasing = false;
 let isDrawingEraser = false;
 let lastUsedColor = currentColor;
 let lastUsedBrushWidth = 2;
+let currentZoom = 1;
+let currentPage = 1;  // Track current page
 
 // Initialize color picker
 const pickr = Pickr.create({
@@ -248,6 +250,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
 // Helper functions
 async function loadAllPages() {
     const container = document.querySelector('.canvas-container');
+    currentPage = 1;  // Reset to first page when loading new document
     
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         // Create canvas wrapper with page number
@@ -264,11 +267,62 @@ async function loadAllPages() {
         wrapper.appendChild(canvasElement);
         container.appendChild(wrapper);
 
-        // Initialize Fabric.js canvas
+        // Initialize Fabric.js canvas with zoom support
         const canvas = new fabric.Canvas(canvasElement, {
-            isDrawingMode: true,
-            width: 1500,
-            height: 1500
+            isDrawingMode: true
+        });
+        
+        canvas.on('mouse:wheel', function(opt) {
+            opt.e.preventDefault();
+            opt.e.stopPropagation();
+          
+            // compute new zoom (clamped)
+            let zoom = canvas.getZoom() * (opt.e.deltaY > 0 ? 0.9 : 1.1);
+            zoom = Math.min(Math.max(zoom, 0.01), 20);
+          
+            // zoom about the CENTER of the canvas
+            const center = new fabric.Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
+            canvas.zoomToPoint(center, zoom);
+          
+            canvas.renderAll();
+          });
+
+        // Add pan functionality when zoomed
+        canvas.on('mouse:down', function(opt) {
+            if (opt.e.altKey) {
+                this.isDragging = true;
+                this.lastPosX = opt.e.clientX;
+                this.lastPosY = opt.e.clientY;
+            }
+        });
+
+        canvas.on('mouse:move', function(opt) {
+            if (this.isDragging) {
+                const e = opt.e;
+                const zoom = canvas.getZoom();
+                let vpt = canvas.viewportTransform;
+                
+                // Calculate new position
+                let newX = vpt[4] + e.clientX - this.lastPosX;
+                let newY = vpt[5] + e.clientY - this.lastPosY;
+                
+                // Limit panning to page boundaries
+                const maxX = 0;
+                const minX = canvas.width * (1 - zoom);
+                const maxY = 0;
+                const minY = canvas.height * (1 - zoom);
+                
+                vpt[4] = Math.min(Math.max(newX, minX), maxX);
+                vpt[5] = Math.min(Math.max(newY, minY), maxY);
+                
+                canvas.requestRenderAll();
+                this.lastPosX = e.clientX;
+                this.lastPosY = e.clientY;
+            }
+        });
+
+        canvas.on('mouse:up', function(opt) {
+            this.isDragging = false;
         });
         
         // Set initial brush properties based on current mode
@@ -513,4 +567,35 @@ function openTextInputDialog(canvas, x, y) {
         canvas.renderAll();
     }
 }
+
+// Add page navigation functions
+function setCurrentPage(pageNum) {
+    if (pageNum >= 1 && pageNum <= totalPages) {
+        currentPage = pageNum;
+    }
+}
+
+function zoomIn() {
+    if (!canvases[currentPage - 1]) return;
+    const canvas = canvases[currentPage - 1];
+  
+    let zoom = canvas.getZoom() * 1.1;
+    zoom = Math.min(zoom, 20);
+  
+    const center = new fabric.Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
+    canvas.zoomToPoint(center, zoom);
+    canvas.renderAll();
+  }
+
+  function zoomOut() {
+    if (!canvases[currentPage - 1]) return;
+    const canvas = canvases[currentPage - 1];
+  
+    let zoom = canvas.getZoom() / 1.1;
+    zoom = Math.max(zoom, 0.01);
+  
+    const center = new fabric.Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
+    canvas.zoomToPoint(center, zoom);
+    canvas.renderAll();
+  }
 

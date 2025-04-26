@@ -21,7 +21,7 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Define a higher resolution zoom matrix for better quality
 ZOOM_MATRIX = fitz.Matrix(8, 8)  # Increased from 2,2 to 4,4 for higher resolution
-TARGET_WIDTH = 1500  # Increased target width for better quality
+TARGET_WIDTH = 1000  # Increased target width for better quality
 
 def get_scaled_dimensions(page):
     """Calculate scaled dimensions maintaining aspect ratio"""
