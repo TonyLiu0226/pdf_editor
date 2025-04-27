@@ -128,25 +128,31 @@ def save_pdf():
         work_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'work_{base_filename}')
         os.makedirs(work_dir, exist_ok=True)
         
+        # Get original page dimensions from the PDF first
+        input_path = os.path.join(app.config['UPLOAD_FOLDER'], data['filename'])
+        pdf_doc = fitz.open(input_path)
+        page = pdf_doc[int(data['current_page']) - 1]
+        orig_width = int(page.rect.width * 4)  # Multiply by 4 for higher resolution
+        orig_height = int(page.rect.height * 4)
+        pdf_doc.close()
+        
         # Decode the image data
         img_data = base64.b64decode(data['image_data'].split(',')[1])
         img = Image.open(io.BytesIO(img_data))
         img_rgb = img.convert('RGB')
         
-        # Get original page dimensions from the PDF
-        input_path = os.path.join(app.config['UPLOAD_FOLDER'], data['filename'])
-        pdf_doc = fitz.open(input_path)
-        page = pdf_doc[int(data['current_page']) - 1]
-        orig_width = page.rect.width
-        orig_height = page.rect.height
-        pdf_doc.close()
+        # Resize to match the high-resolution PDF dimensions
+        img_rgb = img_rgb.resize((orig_width, orig_height), Image.Resampling.LANCZOS)
         
-        # Resize the image to match PDF dimensions exactly
-        img_rgb = img_rgb.resize((int(orig_width), int(orig_height)), Image.Resampling.LANCZOS)
-        
-        # Save the edited page directly without creating a new image
+        # Save with high DPI
         page_pdf_path = os.path.join(work_dir, f'page_{data["current_page"]}.pdf')
-        img_rgb.save(page_pdf_path, 'PDF', resolution=300, quality=100)
+        img_rgb.save(
+            page_pdf_path,
+            'PDF',
+            resolution=300,  # Increased DPI
+            quality=100,
+            dpi=(300, 300)  # Explicit DPI setting
+        )
         
         return jsonify({'success': True})
     except Exception as e:
