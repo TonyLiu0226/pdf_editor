@@ -141,15 +141,12 @@ def save_pdf():
         orig_height = page.rect.height
         pdf_doc.close()
         
-        # Create a new image with the exact PDF dimensions
-        new_img = Image.new('RGB', (int(orig_width), int(orig_height)), 'white')
+        # Resize the image to match PDF dimensions exactly
+        img_rgb = img_rgb.resize((int(orig_width), int(orig_height)), Image.Resampling.LANCZOS)
         
-        # Paste the canvas content onto the new image
-        new_img.paste(img_rgb, (0, 0))
-        
-        # Save the edited page
+        # Save the edited page directly without creating a new image
         page_pdf_path = os.path.join(work_dir, f'page_{data["current_page"]}.pdf')
-        new_img.save(page_pdf_path, 'PDF', resolution=300, quality=100)
+        img_rgb.save(page_pdf_path, 'PDF', resolution=300, quality=100)
         
         return jsonify({'success': True})
     except Exception as e:

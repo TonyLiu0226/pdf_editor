@@ -207,7 +207,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
             const canvas = canvases[pageNum - 1];
             
-            // Reset zoom and position temporarily for saving
+            // Store current state
             const currentZoom = canvas.getZoom();
             const currentVpt = [...canvas.viewportTransform];
             
@@ -215,17 +215,21 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
             canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
             canvas.setZoom(1);
             
-            // Get the data URL of just the canvas content
+            // Get the data URL of the entire canvas
             const dataURL = canvas.toDataURL({
                 format: 'png',
                 quality: 1,
-                width: canvas.width,
-                height: canvas.height,
+                multiplier: 1,  // Ensure 1:1 pixel ratio
+                enableRetinaScaling: false,
+                width: canvas.getWidth(),
+                height: canvas.getHeight(),
                 left: 0,
-                top: 0
+                top: 0,
+                right: canvas.getWidth(),
+                bottom: canvas.getHeight()
             });
             
-            // Restore the previous zoom and position
+            // Restore previous state
             canvas.setViewportTransform(currentVpt);
             canvas.setZoom(currentZoom);
 
@@ -238,8 +242,8 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
                     image_data: dataURL,
                     filename: currentFile,
                     current_page: pageNum,
-                    original_width: canvas.width,
-                    original_height: canvas.height
+                    width: canvas.getWidth(),
+                    height: canvas.getHeight()
                 })
             });
 
@@ -287,10 +291,31 @@ async function loadAllPages() {
         wrapper.appendChild(canvasElement);
         container.appendChild(wrapper);
 
-        // Initialize Fabric.js canvas with zoom support
+        // Initialize Fabric.js canvas
         const canvas = new fabric.Canvas(canvasElement, {
             isDrawingMode: true
         });
+        
+        // Add a border rect that matches the PDF dimensions
+        const border = new fabric.Rect({
+            left: 0,
+            top: 0,
+            width: canvas.width,
+            height: canvas.height,
+            fill: 'transparent',
+            stroke: '#666666',  // Border color
+            strokeWidth: 1,
+            selectable: false,
+            evented: false,
+            excludeFromExport: true  // Don't include border in saved PDF
+        });
+        
+        canvas.add(border);
+        canvas.renderAll();
+        
+        // Move border to back and lock it
+        border.moveTo(0);  // Move to bottom layer
+        canvas.requestRenderAll();
         
         canvas.on('mouse:wheel', function(opt) {
             opt.e.preventDefault();
@@ -367,13 +392,24 @@ async function loadAllPages() {
             if (data.success) {
                 const img = new Image();
                 img.onload = function() {
-                    canvas.setHeight(data.height);
                     canvas.setWidth(data.width);
-                    canvas.setBackgroundImage(img.src, canvas.renderAll.bind(canvas), {
-                        scaleX: canvas.width / img.width,
-                        scaleY: canvas.height / img.height,
-                        crossOrigin: 'anonymous',
-                        quality: 1
+                    canvas.setHeight(data.height);
+                    
+                    // Update border dimensions to match canvas
+                    border.set({
+                        width: data.width,
+                        height: data.height
+                    });
+                    
+                    // Set background image
+                    fabric.Image.fromURL(img.src, function(img) {
+                        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
+                            scaleX: 1,
+                            scaleY: 1,
+                            originX: 'left',
+                            originY: 'top',
+                            crossOrigin: 'anonymous'
+                        });
                     });
                 };
                 img.src = 'data:image/png;base64,' + data.image_data;
