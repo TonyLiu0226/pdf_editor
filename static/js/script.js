@@ -206,10 +206,28 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     try {
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
             const canvas = canvases[pageNum - 1];
+            
+            // Reset zoom and position temporarily for saving
+            const currentZoom = canvas.getZoom();
+            const currentVpt = [...canvas.viewportTransform];
+            
+            // Reset to original state
+            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+            canvas.setZoom(1);
+            
+            // Get the data URL of just the canvas content
             const dataURL = canvas.toDataURL({
                 format: 'png',
-                quality: 1
+                quality: 1,
+                width: canvas.width,
+                height: canvas.height,
+                left: 0,
+                top: 0
             });
+            
+            // Restore the previous zoom and position
+            canvas.setViewportTransform(currentVpt);
+            canvas.setZoom(currentZoom);
 
             const response = await fetch('/save', {
                 method: 'POST',
@@ -219,7 +237,9 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
                 body: JSON.stringify({
                     image_data: dataURL,
                     filename: currentFile,
-                    current_page: pageNum
+                    current_page: pageNum,
+                    original_width: canvas.width,
+                    original_height: canvas.height
                 })
             });
 
@@ -599,3 +619,4 @@ function zoomIn() {
     canvas.renderAll();
   }
 
+//everything on the canvas is being saved, not just the PDF. If zoom out, then a bunch of area around the page is showing in the saved PDF.

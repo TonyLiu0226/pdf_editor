@@ -128,7 +128,7 @@ def save_pdf():
         work_dir = os.path.join(app.config['UPLOAD_FOLDER'], f'work_{base_filename}')
         os.makedirs(work_dir, exist_ok=True)
         
-        # Save the edited page as a single-page PDF
+        # Decode the image data
         img_data = base64.b64decode(data['image_data'].split(',')[1])
         img = Image.open(io.BytesIO(img_data))
         img_rgb = img.convert('RGB')
@@ -141,12 +141,15 @@ def save_pdf():
         orig_height = page.rect.height
         pdf_doc.close()
         
-        # Resize image to match original PDF dimensions
-        img_rgb = img_rgb.resize((int(orig_width), int(orig_height)), Image.Resampling.LANCZOS)
+        # Create a new image with the exact PDF dimensions
+        new_img = Image.new('RGB', (int(orig_width), int(orig_height)), 'white')
+        
+        # Paste the canvas content onto the new image
+        new_img.paste(img_rgb, (0, 0))
         
         # Save the edited page
         page_pdf_path = os.path.join(work_dir, f'page_{data["current_page"]}.pdf')
-        img_rgb.save(page_pdf_path, 'PDF', quality=95, optimize=False)
+        new_img.save(page_pdf_path, 'PDF', resolution=300, quality=100)
         
         return jsonify({'success': True})
     except Exception as e:
