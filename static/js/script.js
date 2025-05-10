@@ -29,62 +29,7 @@ const pickr = Pickr.create({
     }
 });
 
-// Define fonts that are not from Google Fonts
-const SYSTEM_FONTS = ['Arial', 'Times New Roman'];
 
-function loadGoogleFont(fontName) {
-    // Skip if it's a system font
-    if (SYSTEM_FONTS.includes(fontName)) return;
-    
-    // Format font name for URL
-    const formattedFont = fontName.replace(/\s+/g, '+');
-    
-    // Create and append link element
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = `https://fonts.googleapis.com/css2?family=${formattedFont}&display=swap`;
-    document.head.appendChild(link);
-}
-
-// Function to load Google Fonts
-function loadGoogleFonts() {
-    // Get all font options from the select element
-    const fontSelect = document.getElementById('fontFamily');
-    const fonts = Array.from(fontSelect.options)
-        .map(option => option.value)
-        .filter(font => !SYSTEM_FONTS.includes(font)) // Filter out system fonts
-        .map(font => font.replace(/\s+/g, '+')); // Replace spaces with + for URL
-
-    // Create link element for Google Fonts
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = `https://fonts.googleapis.com/css2?family=${fonts.join('&family=')}&display=swap`;
-    document.head.appendChild(link);
-}
-
-// Update the handleTextModeClick function to ensure font is loaded
-function handleTextModeClick(opt) {
-    if (!isTextMode) return;
-    const canvas = opt.target?.canvas || this;
-    const pointer = canvas.getPointer(opt.e);
-    if (!opt.target) {
-      const text = prompt('Enter text:');
-      if (!text) return;
-      const selectedFont = document.getElementById('fontFamily').value;
-      const size = parseInt(document.getElementById('fontSizeSelect').value,10);
-      loadGoogleFont(selectedFont);
-      const textbox = new fabric.Textbox(text, {
-        left: pointer.x,
-        top:  pointer.y,
-        fontFamily: selectedFont.replace('+',' '),
-        fontSize:   size,
-        fill:       currentColor,
-        editable:   true
-      });
-      canvas.add(textbox).setActiveObject(textbox);
-      canvas.renderAll();
-    }
-  }
 
 // Tool selection
 const drawBtn = document.getElementById('drawBtn');
@@ -214,110 +159,7 @@ brushSize.addEventListener('input', (e) => {
     brushSizeValue.textContent = size + 'px';
 });
 
-// File upload handling
-document.getElementById('pdfFile').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
 
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
-        });
-        const data = await response.json();
-
-        if (data.success) {
-            currentFile = data.filename;
-            totalPages = data.total_pages;
-            // Clear existing canvases
-            document.querySelector('.canvas-container').innerHTML = '';
-            canvases = [];
-            // Load all pages
-            await loadAllPages();
-            enableControls();
-        } else {
-            alert('Error uploading file: ' + data.error);
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error uploading file');
-    }
-});
-
-// Save PDF
-document.getElementById('saveBtn').addEventListener('click', async () => {
-    if (canvases.length === 0) return;
-
-    try {
-        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-            const canvas = canvases[pageNum - 1];
-            
-            // Store current state
-            const currentZoom = canvas.getZoom();
-            const currentVpt = [...canvas.viewportTransform];
-            
-            // Reset to original state
-            canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-            canvas.setZoom(1);
-            
-            // Get the data URL of the entire canvas
-            const dataURL = canvas.toDataURL({
-                format: 'png',
-                quality: 1,
-                multiplier: 1,  // Ensure 1:1 pixel ratio
-                enableRetinaScaling: false,
-                width: canvas.getWidth(),
-                height: canvas.getHeight(),
-                left: 0,
-                top: 0,
-                right: canvas.getWidth(),
-                bottom: canvas.getHeight()
-            });
-            
-            // Restore previous state
-            canvas.setViewportTransform(currentVpt);
-            canvas.setZoom(currentZoom);
-
-            const response = await fetch('/save', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    image_data: dataURL,
-                    filename: currentFile,
-                    current_page: pageNum,
-                    width: canvas.getWidth(),
-                    height: canvas.getHeight()
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error("Error saving page " + pageNum);
-            }
-        }
-
-        // Download the final PDF
-        const response = await fetch("/get_final_pdf/" + currentFile);
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = "edited_" + currentFile;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            a.remove();
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error saving PDF: ' + error.message);
-    }
-});
 
 // Helper functions
 async function loadAllPages() {
@@ -597,90 +439,6 @@ mergeBtn.addEventListener('click', async () => {
     }
 });
 
-// --- Text Insertion Functionality ---
-
-// Add a button for text tool in your HTML with id 'textBtn'
-const textBtn = document.getElementById('textBtn');
-
-// Track text tool state
-let isTextMode = false;
-
-function setTextMode(active) {
-    isTextMode = active;
-    if (active) {
-        setActiveButton(textBtn);
-        canvases.forEach(canvas => {
-            canvas.isDrawingMode = false;
-            canvas.defaultCursor = 'text';
-            canvas.selection = true;
-
-            // Remove previous listener to avoid duplicates
-            canvas.off('mouse:down', handleTextModeClick);
-
-            // Add handler again
-            canvas.on('mouse:down', handleTextModeClick);
-
-            canvas.forEachObject(obj => {
-                obj.selectable = obj.type === 'textbox';
-                obj.evented = obj.type === 'textbox';
-            });
-        });
-    } else {
-        textBtn.classList.remove('active');
-        canvases.forEach(canvas => {
-            canvas.off('mouse:down', handleTextModeClick); // Clean up listener
-
-            canvas.forEachObject(obj => {
-                obj.selectable = obj.type === 'textbox';
-                obj.evented = obj.type === 'textbox';
-            });
-            canvas.isDrawingMode = !isErasing && !isDrawingEraser;
-            canvas.defaultCursor = 'default';
-            canvas.selection = false;
-        });
-    }
-}
-
-// Text tool button event
-textBtn.addEventListener('click', () => {
-    setTextMode(!isTextMode);
-});
-
-// Add text on canvas click when in text mode
-canvases.forEach(canvas => {
-    canvas.on('mouse:down', function(opt) {
-        if (!isTextMode) return;
-        const pointer = canvas.getPointer(opt.e);
-        openTextInputDialog(canvas, pointer.x, pointer.y);
-    });
-});
-
-// Helper to open a prompt for text input and add to canvas
-const fontFamilySelect = document.getElementById('fontFamily');
-const fontSizeSelect   = document.getElementById('fontSizeSelect');
-
-function openTextInputDialog(canvas, x, y) {
-  const text = prompt('Enter text:');
-  if (!text || !text.trim()) return;
-
-  const fontFamily = fontFamilySelect.value;
-  const fontSize   = parseInt(fontSizeSelect.value, 10);
-
-  // load the font so Fabric can use it
-  loadGoogleFont(fontFamily);
-
-  const textbox = new fabric.Textbox(text, {
-    left: x,
-    top: y,
-    fontFamily: fontFamily.replace('+', ' '), // Fabric wants space
-    fontSize: fontSize,
-    fill: currentColor,
-    editable: true
-  });
-  canvas.add(textbox).setActiveObject(textbox);
-  canvas.renderAll();
-}
-
 // Add page navigation functions
 function setCurrentPage(pageNum) {
     if (pageNum >= 1 && pageNum <= totalPages) {
@@ -718,32 +476,32 @@ canvases.forEach(canvas => {
     canvas.on('selection:updated', updateTextControls);
   });
   
-  function updateTextControls(e) {
+function updateTextControls(e) {
     const obj = e.selected[0];
     if (obj && obj.type === 'textbox') {
       // reflect its settings in the UI
       fontFamilySelect.value = obj.fontFamily.replace(' ', '+');
       fontSizeSelect.value   = obj.fontSize;
     }
-  }
+}
   
-  // when user changes fontFamilySelect or fontSizeSelect, apply to active textbox
-  fontFamilySelect.addEventListener('change', () => {
+// when user changes fontFamilySelect or fontSizeSelect, apply to active textbox
+fontFamilySelect.addEventListener('change', () => {
     const obj = fabric.Canvas.activeInstance?.getActiveObject();
     if (obj?.type === 'textbox') {
       loadGoogleFont(fontFamilySelect.value);
       obj.set('fontFamily', fontFamilySelect.value.replace('+',' '));
       fabric.Canvas.activeInstance.renderAll();
     }
-  });
+});
   
-  fontSizeSelect.addEventListener('input', () => {
+fontSizeSelect.addEventListener('input', () => {
     const obj = fabric.Canvas.activeInstance?.getActiveObject();
     if (obj?.type === 'textbox') {
       obj.set('fontSize', parseInt(fontSizeSelect.value,10));
       fabric.Canvas.activeInstance.renderAll();
     }
-  });
+});
 
 // Update font selection handler
 document.addEventListener('DOMContentLoaded', () => {
@@ -767,6 +525,4 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
-    
-    // ... rest of the event listeners ...
 });

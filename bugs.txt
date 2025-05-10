@@ -1,0 +1,4 @@
+- Several fonts are not working
+- Changing of fonts or colors after user already enters text not possible
+- Double dialog boxes for entering font
+- 
