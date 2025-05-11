@@ -116,7 +116,7 @@ function clearEraserListeners(canvas) {
         canvas.on('mouse:down', function(opt) {
           const target = opt.target;
           // only remove free‑drawn paths (type 'path')
-          if (target && target.type === 'path') {
+          if (target && (target.type === 'path' || target.type === 'textbox')) {
             canvas.remove(target);
           }
         });
@@ -124,7 +124,7 @@ function clearEraserListeners(canvas) {
         canvas.on('mouse:move', function(opt) {
           if (opt.e.buttons !== 1) return; // only while mouse is down
           const target = canvas.findTarget(opt.e);
-          if (target && target.type === 'path') {
+          if (target && (target.type === 'path' || target.type === 'textbox')) {
             canvas.remove(target);
           }
         });
