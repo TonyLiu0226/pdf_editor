@@ -33,6 +33,13 @@ let isTextMode = false;
 function setTextMode(active) {
     isTextMode = active;
     if (active) {
+        if (typeof isErasing !== 'undefined') {
+            isErasing = false;
+        }
+        if (typeof isDrawingEraser !== 'undefined') {
+            isDrawingEraser = false;
+        }
+
         setActiveButton(textBtn);
         canvases.forEach(canvas => {
             canvas.isDrawingMode = false;
@@ -70,17 +77,6 @@ function setTextMode(active) {
 textBtn.addEventListener('click', () => {
     setTextMode(!isTextMode);
 });
-
-// Add text on canvas click when in text mode
-/* This block is redundant as handleTextModeClick already covers this.
-canvases.forEach(canvas => {
-    canvas.on('mouse:down', function(opt) {
-        if (!isTextMode) return;
-        const pointer = canvas.getPointer(opt.e);
-        openTextInputDialog(canvas, pointer.x, pointer.y);
-    });
-});
-*/
 
 // Helper to open a prompt for text input and add to canvas
 const fontFamilySelect = document.getElementById('fontFamily');
