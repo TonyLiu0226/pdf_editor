@@ -8,6 +8,11 @@ let lastUsedColor = currentColor;
 let lastUsedBrushWidth = 2;
 let currentZoom = 1;
 let currentPage = 1;  // Track current page
+let history = [];
+let redoHistory = [];
+let isUndoRedo = false; // Flag to prevent saving state during undo/redo
+const fontFamilySelect = document.getElementById('fontFamily');
+const fontSizeSelect = document.getElementById('fontSizeSelect');
 
 // Initialize color picker
 const pickr = Pickr.create({
@@ -69,7 +74,8 @@ function clearEraserListeners(canvas) {
       brushSize.value = lastUsedBrushWidth;
       brushSizeValue.textContent = lastUsedBrushWidth + 'px';
     }
-});
+    saveAllCanvasStates(); 
+  });
   
   // White eraser mode (just paints white)
   eraseBtn.addEventListener('click', () => {
@@ -91,7 +97,8 @@ function clearEraserListeners(canvas) {
       });
       pickr.setColor(currentColor);
     }
-});
+    saveAllCanvasStates(); 
+  });
   
   // Drawing eraser mode (truly erases only drawn paths)
   drawEraserBtn.addEventListener('click', () => {
@@ -130,7 +137,8 @@ function clearEraserListeners(canvas) {
         });
       });
     }
-}); 
+    // Note: saveState will be called by object:removed event for this eraser
+  }); 
 
 // Color picker event
 pickr.on('change', (color) => {
@@ -141,6 +149,7 @@ pickr.on('change', (color) => {
             canvas.freeDrawingBrush.color = currentColor;
         });
     }
+    saveAllCanvasStates(); 
 });
 
 // Brush size slider
@@ -157,6 +166,7 @@ brushSize.addEventListener('input', (e) => {
         }
     });
     brushSizeValue.textContent = size + 'px';
+    saveAllCanvasStates(); 
 });
 
 
@@ -164,7 +174,10 @@ brushSize.addEventListener('input', (e) => {
 // Helper functions
 async function loadAllPages() {
     const container = document.querySelector('.canvas-container');
-    currentPage = 1;  // Reset to first page when loading new document
+    currentPage = 1;
+    history = []; 
+    redoHistory = []; 
+    canvases = []; 
     
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         // Create canvas wrapper with page number
@@ -275,6 +288,19 @@ async function loadAllPages() {
         
         canvases.push(canvas);
 
+        // Event listeners for history saving
+        canvas.on('object:added', () => saveState(canvas));
+        canvas.on('object:modified', () => saveState(canvas));
+        canvas.on('object:removed', () => saveState(canvas));
+
+        // Specific listener for textboxes to make them selectable
+        canvas.on('object:added', function(opt) {
+            if (opt.target && opt.target.type === 'textbox') {
+                opt.target.selectable = true;
+                opt.target.evented = true;
+            }
+        });
+
         try {
             const response = await fetch("/get_page/" + currentFile + "/" + pageNum);
             const data = await response.json();
@@ -284,44 +310,37 @@ async function loadAllPages() {
                 img.onload = function() {
                     canvas.setWidth(data.width);
                     canvas.setHeight(data.height);
-                    
-                    // Update border dimensions to match canvas
-                    border.set({
-                        width: data.width,
-                        height: data.height
-                    });
-                    
-                    // Set background image
-                    fabric.Image.fromURL(img.src, function(img) {
-                        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), {
-                            scaleX: 1,
-                            scaleY: 1,
-                            originX: 'left',
-                            originY: 'top',
-                            crossOrigin: 'anonymous'
+                    border.set({ width: data.width, height: data.height });
+                    fabric.Image.fromURL(img.src, function(fImg) {
+                        canvas.setBackgroundImage(fImg, () => {
+                            canvas.renderAll();
+                            saveState(canvas, true); // Initial save AFTER background is set
+                        }, {
+                            scaleX: 1, scaleY: 1, originX: 'left', originY: 'top', crossOrigin: 'anonymous'
                         });
                     });
                 };
+                img.onerror = function() { // Handle image load error
+                    console.error("Error loading background image for page " + pageNum + " (img.onerror).");
+                    saveState(canvas, true); // Save state of canvas without background
+                };
                 img.src = 'data:image/png;base64,' + data.image_data;
+            } else {
+                console.error("'/get_page' endpoint indicates failure for page " + pageNum + ": " + (data.error || "Unknown error"));
+                saveState(canvas, true); // Save state if server reports no success
             }
         } catch (error) {
-            console.error("Error loading page " + pageNum + ":", error);
+            console.error("Exception loading page " + pageNum + ":", error);
+            saveState(canvas, true); // Save state on exception
         }
 
-        // After initializing the canvas:
+        // Listener for text input
         canvas.on('mouse:down', function(opt) {
             if (!isTextMode) return;
             const pointer = canvas.getPointer(opt.e);
             // Only add new text if not clicking on an existing object
             if (!opt.target) {
                 openTextInputDialog(canvas, pointer.x, pointer.y);
-            }
-        });
-        // Ensure text objects are selectable for resizing/moving
-        canvas.on('object:added', function(opt) {
-            if (opt.target && opt.target.type === 'textbox') {
-                opt.target.selectable = true;
-                opt.target.evented = true;
             }
         });
     }
@@ -525,4 +544,75 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+
+    if (undoBtn) {
+        undoBtn.addEventListener('click', undo);
+    }
+    if (redoBtn) {
+        redoBtn.addEventListener('click', redo);
+    }
 });
+
+function saveState(canvas, isInitial = false) {
+    if (isUndoRedo) return; // Don't save state during an undo/redo operation
+
+    const canvasIndex = canvases.indexOf(canvas);
+    if (canvasIndex === -1) return; // Should not happen
+
+    // Initialize history for this canvas if it doesn't exist
+    if (!history[canvasIndex]) {
+        history[canvasIndex] = [];
+    }
+    if (!redoHistory[canvasIndex]) {
+        redoHistory[canvasIndex] = [];
+    }
+
+    const json = canvas.toJSON();
+    history[canvasIndex].push(json);
+    
+    // If it's not an initial save (i.e., a user action), clear the redo history for that canvas
+    if (!isInitial) {
+        redoHistory[canvasIndex] = [];
+    }
+}
+
+// Helper to save state for all canvases (e.g., after a global tool change)
+function saveAllCanvasStates() {
+    canvases.forEach(canvas => saveState(canvas));
+}
+
+function undo() {
+    if (canvases.length === 0 || !canvases[currentPage - 1]) return;
+    const canvas = canvases[currentPage - 1];
+    const canvasIndex = canvases.indexOf(canvas);
+
+    if (history[canvasIndex] && history[canvasIndex].length > 1) {
+        isUndoRedo = true;
+        const currentState = history[canvasIndex].pop();
+        redoHistory[canvasIndex].push(currentState);
+        const prevState = history[canvasIndex][history[canvasIndex].length - 1];
+        canvas.loadFromJSON(prevState, () => {
+            canvas.renderAll();
+            isUndoRedo = false;
+        });
+    }
+}
+
+function redo() {
+    if (canvases.length === 0 || !canvases[currentPage - 1]) return;
+    const canvas = canvases[currentPage - 1];
+    const canvasIndex = canvases.indexOf(canvas);
+
+    if (redoHistory[canvasIndex] && redoHistory[canvasIndex].length > 0) {
+        isUndoRedo = true;
+        const nextState = redoHistory[canvasIndex].pop();
+        history[canvasIndex].push(nextState);
+        canvas.loadFromJSON(nextState, () => {
+            canvas.renderAll();
+            isUndoRedo = false;
+        });
+    }
+}

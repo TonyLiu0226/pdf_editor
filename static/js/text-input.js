@@ -79,9 +79,6 @@ textBtn.addEventListener('click', () => {
 });
 
 // Helper to open a prompt for text input and add to canvas
-const fontFamilySelect = document.getElementById('fontFamily');
-const fontSizeSelect   = document.getElementById('fontSizeSelect');
-
 function openTextInputDialog(canvas, x, y) {
   const text = prompt('Enter text:');
   if (!text || !text.trim()) return;

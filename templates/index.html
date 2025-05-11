@@ -22,7 +22,7 @@
             <div class="container">
                 <div class="controls">
                     <div class="file-input-container">
-                        <label for="pdfFile" class="file-input-label">Choose PDF</label>
+                        <label for="pdfFile" class="file-input-label">Upload</label>
                         <input type="file" id="pdfFile" accept=".pdf">
                     </div>
                     
@@ -31,6 +31,8 @@
                         <button id="eraseBtn" class="tool-btn" title="Erase anything (including PDF content)">White Eraser</button>
                         <button id="drawEraserBtn" class="tool-btn" title="Erase only drawn content">Drawing Eraser</button>
                         <button id="textBtn" class="tool-btn">Text</button>
+                        <button id="undoBtn" class="tool-btn" title="Undo last action">Undo</button>
+                        <button id="redoBtn" class="tool-btn" title="Redo last action">Redo</button>
                         <button onclick="zoomIn()" class="tool-btn">Zoom In</button>
                         <button onclick="zoomOut()" class="tool-btn">Zoom Out</button>
                     </div>
